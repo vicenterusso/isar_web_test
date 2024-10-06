@@ -21,6 +21,13 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::vec;
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use js_sys;
+#[cfg(target_arch = "wasm32")]
+use web_sys;
+
 pub(crate) struct SQLiteInstanceInfo {
     pub(crate) instance_id: u32,
     pub(crate) name: String,
@@ -67,6 +74,25 @@ impl SQLiteInstance {
             Err(IsarError::IllegalArgument {})
         }
     }
+
+    #[cfg(target_arch = "wasm32")]
+    fn init_opfs() -> Result<()> {
+        let window = web_sys::window().expect("no global `window` exists");
+        let init_opfs: js_sys::Function = js_sys::Reflect::get(&window, &"initOPFS".into())
+            .map_err(|_| IsarError::DbError { 
+                code: 1,
+                message: "Failed to find initOPFS function".to_string() 
+            })?
+            .dyn_into()
+            .unwrap();
+        let _ = init_opfs.call0(&JsValue::NULL)
+            .map_err(|_| IsarError::DbError { 
+                code: 2,
+                message: "Failed to initialize OPFS".to_string() 
+            })?;
+        Ok(())
+    }
+
 }
 
 impl IsarInstance for SQLiteInstance {
@@ -120,6 +146,10 @@ impl IsarInstance for SQLiteInstance {
         encryption_key: Option<&str>,
         compact_condition: Option<CompactCondition>,
     ) -> Result<Self> {
+
+        #[cfg(target_arch = "wasm32")]
+        Self::init_opfs()?;
+
         if compact_condition.is_some() {
             return Err(IsarError::IllegalArgument {});
         }
@@ -363,4 +393,10 @@ impl IsarInstance for SQLiteInstance {
     fn close(instance: Self::Instance, delete: bool) -> bool {
         close_instance(instance.info, instance.sqlite, delete)
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = initOPFS)]
+pub fn init_opfs() -> Result<(), JsValue> {
+    SQLiteInstance::init_opfs().map_err(|e| JsValue::from_str(&e.to_string()))
 }

@@ -42,9 +42,11 @@ pub(crate) fn open_sqlite(
     max_size_mib: u32,
     encryption_key: Option<&str>,
 ) -> Result<(SQLiteInstanceInfo, SQLite3)> {
-    let path = if dir == SQLITE_MEMORY_DIR {
-        format!("file:{}?mode=memory", name)
+    } else if cfg!(target_arch = "wasm32") {
+        // Web environment: use OPFS
+        format!("file:{}?vfs=opfs", name)
     } else {
+        // Native platforms: use file system
         let mut path_buf = PathBuf::from(dir);
         path_buf.push(format!("{}.sqlite", name));
         path_buf.as_path().to_str().unwrap().to_string()
@@ -74,8 +76,15 @@ pub(crate) fn open_sqlite(
         txn.abort();
     }
 
-    let instance_info =
-        SQLiteInstanceInfo::new(instance_id, name, dir, &path, encryption_key, collections);
+    let instance_info = SQLiteInstanceInfo::new(
+        instance_id,
+        name,
+        dir,
+        &path,
+        encryption_key,
+        collections,
+    );
+
     let sqlite = Rc::into_inner(sqlite).unwrap();
     Ok((instance_info, sqlite))
 }
