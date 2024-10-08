@@ -2,6 +2,8 @@ use libsqlite3_sys::{sqlite3_file, sqlite3_vfs, sqlite3_vfs_register, sqlite3_io
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::os::raw::{c_char, c_int, c_void};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use wasm_bindgen::convert::{IntoWasmAbi, FromWasmAbi, IntoJsResult};
 use std::ptr::null_mut;
 use js_sys::Uint8Array;
 use web_sys::window;
@@ -271,7 +273,7 @@ unsafe extern "C" fn opfs_vfs_randomness(
     };
 
     let crypto = match window.crypto() {
-        Ok(crypto) => crypto,init_opfs 
+        Ok(crypto) => crypto,
         Err(_) => return 0, // Return 0 if we can't get the crypto object
     };
 
@@ -293,10 +295,8 @@ unsafe extern "C" fn opfs_vfs_randomness(
 
 unsafe extern "C" fn opfs_vfs_sleep(
     _arg1: *mut sqlite3_vfs,
-    microseconds: c_int,
+    _microseconds: c_int,
 ) -> c_int {
-    // In a web environment, we can't actually sleep.
-    // We'll just return immediately.
     0
 }
 
@@ -310,6 +310,17 @@ unsafe extern "C" fn opfs_vfs_current_time(
     SQLITE_OK
 }
 
+unsafe extern "C" fn opfs_io_fetch(_file: *mut sqlite3_file, _iOfst: i64, _iAmt: i32, _pp: *mut *mut c_void) -> i32 {
+    SQLITE_OK
+}
+
+unsafe extern "C" fn opfs_io_shm_barrier(_file: *mut sqlite3_file) {
+    // No-op for OPFS
+}
+
+unsafe extern "C" fn opfs_io_shm_lock(_file: *mut sqlite3_file, _offset: i32, _n: i32, _flags: i32) -> i32 {
+    SQLITE_OK
+}
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_os_init() -> c_int {
@@ -340,9 +351,6 @@ pub unsafe extern "C" fn sqlite3_os_init() -> c_int {
 
     let opfs_io_methods = sqlite3_io_methods {
         iVersion: 1,
-        xFetch: Some(opfs_io_fetch),
-        xShmBarrier: Some(opfs_io_shm_barrier),
-        xShmLock: Some(opfs_io_shm_lock),
         xClose: Some(opfs_vfs_close),
         xRead: Some(opfs_vfs_read),
         xWrite: Some(opfs_vfs_write),
@@ -355,7 +363,12 @@ pub unsafe extern "C" fn sqlite3_os_init() -> c_int {
         xFileControl: Some(opfs_vfs_file_control),
         xSectorSize: Some(opfs_vfs_sector_size),
         xDeviceCharacteristics: Some(opfs_vfs_device_characteristics),
-        // ... fill in the rest of the methods as needed
+        xShmMap: Some(opfs_io_shm_map),
+        xShmLock: Some(opfs_io_shm_lock),
+        xShmBarrier: Some(opfs_io_shm_barrier),
+        xShmUnmap: Some(opfs_io_shm_unmap),
+        xFetch: Some(opfs_io_fetch),
+        xUnfetch: Some(opfs_io_unfetch),
     };
 
     // Store opfs_io_methods in a static variable or some other way to keep it alive
@@ -370,8 +383,8 @@ pub unsafe extern "C" fn xSleep(_arg1: *mut sqlite3_vfs, _microseconds: c_int) -
 
 pub unsafe extern "C" fn xRandomness(
     _arg1: *mut sqlite3_vfs,
-    nByte: c_int,
-    zByte: *mut c_char,
+    _nByte: c_int,
+    _zByte: *mut c_char,
 ) -> c_int {
     0
 }
