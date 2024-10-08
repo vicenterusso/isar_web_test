@@ -1,3 +1,4 @@
+use wasm_bindgen::JsValue;
 use super::sqlite3::SQLite3;
 use super::sqlite_collection::SQLiteCollection;
 use super::sqlite_cursor::SQLiteCursor;
@@ -397,6 +398,6 @@ impl IsarInstance for SQLiteInstance {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = initOPFS)]
-pub fn init_opfs() -> Result<(), JsValue> {
+pub fn init_opfs() -> Result<(), wasm_bindgen::JsValue> {
     SQLiteInstance::init_opfs().map_err(|e| JsValue::from_str(&e.to_string()))
 }

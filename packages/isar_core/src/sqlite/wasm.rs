@@ -1,8 +1,12 @@
-use libsqlite3_sys::{sqlite3_file, sqlite3_vfs, sqlite3_vfs_register, SQLITE_OK, SQLITE_BUSY, SQLITE_IOERR};
-use std::os::raw::{c_char, c_int, c_void};
-use std::ptr::null_mut;
-use wasm_bindgen::prelude::*;
+use libsqlite3_sys::{sqlite3_file, sqlite3_vfs, sqlite3_vfs_register, sqlite3_io_methods, SQLITE_OK, SQLITE_BUSY, SQLITE_IOERR};
 use std::sync::atomic::{AtomicI32, Ordering};
+use std::os::raw::{c_char, c_int, c_void};
+use wasm_bindgen::prelude::*;
+use std::ptr::null_mut;
+use js_sys::Uint8Array;
+use web_sys::window;
+use std::slice;
+
 
 extern "C" {
     /*pub fn js_log(ptr: *const u8);
@@ -15,7 +19,7 @@ extern "C" {
 }
 
 
-
+static mut OPFS_IO_METHODS: *mut sqlite3_io_methods = std::ptr::null_mut();
 
 // JavaScript functions we'll call from Rust
 #[wasm_bindgen]
@@ -238,6 +242,75 @@ unsafe extern "C" fn opfs_vfs_access(
     SQLITE_OK
 }
 
+unsafe extern "C" fn opfs_vfs_fullpathname(
+    _arg1: *mut sqlite3_vfs,
+    zName: *const c_char,
+    nOut: c_int,
+    zOut: *mut c_char,
+) -> c_int {
+    let input = std::ffi::CStr::from_ptr(zName).to_str().unwrap();
+    let output = std::ffi::CStr::from_bytes_with_nul(input.as_bytes())
+        .unwrap()
+        .to_owned();
+    let len = std::cmp::min(nOut as usize - 1, output.as_bytes().len());
+    unsafe {
+        std::ptr::copy_nonoverlapping(output.as_ptr(), zOut, len);
+        *zOut.add(len) = 0;
+    }
+    SQLITE_OK
+}
+
+unsafe extern "C" fn opfs_vfs_randomness(
+    _arg1: *mut sqlite3_vfs,
+    nByte: c_int,
+    zByte: *mut c_char,
+) -> c_int {
+    let window = match window() {
+        Some(win) => win,
+        None => return 0, // Return 0 if we can't get the window object
+    };
+
+    let crypto = match window.crypto() {
+        Ok(crypto) => crypto,
+        Err(_) => return 0, // Return 0 if we can't get the crypto object
+    };
+
+    let buffer = match Uint8Array::new_with_length(nByte as u32).into_result() {
+        Ok(buf) => buf,
+        Err(_) => return 0, // Return 0 if we can't create the buffer
+    };
+
+    if let Err(_) = crypto.get_random_values_with_u8_array(&buffer) {
+        return 0; // Return 0 if we can't fill the buffer with random values
+    }
+
+    for i in 0..nByte as usize {
+        *zByte.add(i) = buffer.get_index(i as u32) as i8;
+    }
+
+    nByte
+}
+
+unsafe extern "C" fn opfs_vfs_sleep(
+    _arg1: *mut sqlite3_vfs,
+    microseconds: c_int,
+) -> c_int {
+    // In a web environment, we can't actually sleep.
+    // We'll just return immediately.
+    0
+}
+
+unsafe extern "C" fn opfs_vfs_current_time(
+    _arg1: *mut sqlite3_vfs,
+    pTime: *mut f64,
+) -> c_int {
+    unsafe {
+        *pTime = js_sys::Date::now() / 86400000.0 + 2440587.5;
+    }
+    SQLITE_OK
+}
+
+
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_os_init() -> c_int {
     let opfs_vfs = sqlite3_vfs {
@@ -285,7 +358,7 @@ pub unsafe extern "C" fn sqlite3_os_init() -> c_int {
     // Store opfs_io_methods in a static variable or some other way to keep it alive
     OPFS_IO_METHODS = Box::into_raw(Box::new(opfs_io_methods));
     
-    sqlite3_vfsv_register(Box::leak(Box::new(opfs_vfs)), 1)
+    sqlite3_vfs_register(Box::leak(Box::new(opfs_vfs)), 1)
 }
 
 pub unsafe extern "C" fn xSleep(_arg1: *mut sqlite3_vfs, microseconds: c_int) -> c_int {
@@ -423,3 +496,4 @@ unsafe extern "C" fn wasm_vfs_dlsym(
 unsafe extern "C" fn wasm_vfs_dlclose(_arg1: *mut sqlite3_vfs, _arg2: *mut c_void) {
     // no-op
 }
+
