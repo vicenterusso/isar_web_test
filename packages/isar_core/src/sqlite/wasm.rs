@@ -202,7 +202,7 @@ unsafe extern "C" fn opfs_vfs_truncate(file: *mut sqlite3_file, size: i64) -> c_
     }
 }
 
-unsafe extern "C" fn opfs_vfs_sync(file: *mut sqlite3_file, flags: c_int) -> c_int {
+unsafe extern "C" fn opfs_vfs_sync(file: *mut sqlite3_file, _flags: c_int) -> c_int {
     let opfs_file = &mut *(file as *mut OpfsFile);
     match opfs_sync(opfs_file.fd) {
         0 => SQLITE_OK,
@@ -271,11 +271,11 @@ unsafe extern "C" fn opfs_vfs_randomness(
     };
 
     let crypto = match window.crypto() {
-        Ok(crypto) => crypto,
+        Ok(crypto) => crypto,init_opfs 
         Err(_) => return 0, // Return 0 if we can't get the crypto object
     };
 
-    let buffer = match Uint8Array::new_with_length(nByte as u32).into_result() {
+    let buffer = match Uint8Array::new_with_length(nByte as u32).into_js_result() {
         Ok(buf) => buf,
         Err(_) => return 0, // Return 0 if we can't create the buffer
     };
@@ -340,6 +340,9 @@ pub unsafe extern "C" fn sqlite3_os_init() -> c_int {
 
     let opfs_io_methods = sqlite3_io_methods {
         iVersion: 1,
+        xFetch: Some(opfs_io_fetch),
+        xShmBarrier: Some(opfs_io_shm_barrier),
+        xShmLock: Some(opfs_io_shm_lock),
         xClose: Some(opfs_vfs_close),
         xRead: Some(opfs_vfs_read),
         xWrite: Some(opfs_vfs_write),
@@ -361,7 +364,7 @@ pub unsafe extern "C" fn sqlite3_os_init() -> c_int {
     sqlite3_vfs_register(Box::leak(Box::new(opfs_vfs)), 1)
 }
 
-pub unsafe extern "C" fn xSleep(_arg1: *mut sqlite3_vfs, microseconds: c_int) -> c_int {
+pub unsafe extern "C" fn xSleep(_arg1: *mut sqlite3_vfs, _microseconds: c_int) -> c_int {
     0
 }
 
@@ -373,7 +376,7 @@ pub unsafe extern "C" fn xRandomness(
     0
 }
 
-pub unsafe extern "C" fn xCurrentTime(_arg1: *mut sqlite3_vfs, pTime: *mut f64) -> c_int {
+pub unsafe extern "C" fn xCurrentTime(_arg1: *mut sqlite3_vfs, _pTime: *mut f64) -> c_int {
     0
 }
 

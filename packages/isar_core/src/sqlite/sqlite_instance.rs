@@ -310,7 +310,7 @@ impl IsarInstance for SQLiteInstance {
         query: &'a Self::Query,
         offset: Option<u32>,
         limit: Option<u32>,
-    ) -> Result<Self::QueryCursor<'_>> {
+    ) -> Result<Self::QueryCursor<'a>> {
         query.cursor(txn, &self.info.collections, offset, limit)
     }
 
@@ -398,6 +398,6 @@ impl IsarInstance for SQLiteInstance {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = initOPFS)]
-pub fn init_opfs() -> Result<(), wasm_bindgen::JsValue> {
+pub fn init_opfs() -> Result<(), JsValue> {
     SQLiteInstance::init_opfs().map_err(|e| JsValue::from_str(&e.to_string()))
 }
