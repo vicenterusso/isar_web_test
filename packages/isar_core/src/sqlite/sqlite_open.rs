@@ -42,6 +42,8 @@ pub(crate) fn open_sqlite(
     max_size_mib: u32,
     encryption_key: Option<&str>,
 ) -> Result<(SQLiteInstanceInfo, SQLite3)> {
+    let path = if dir == SQLITE_MEMORY_DIR {
+        format!("file:{}?mode=memory", name)
     } else if cfg!(target_arch = "wasm32") {
         // Web environment: use OPFS
         format!("file:{}?vfs=opfs", name)
