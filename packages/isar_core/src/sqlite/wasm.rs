@@ -1,6 +1,7 @@
 use libsqlite3_sys::{sqlite3_file, sqlite3_vfs, sqlite3_vfs_register, SQLITE_OK, SQLITE_BUSY, SQLITE_IOERR};
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr::null_mut;
+use wasm_bindgen::prelude::*;
 use std::sync::atomic::{AtomicI32, Ordering};
 
 extern "C" {
@@ -13,10 +14,8 @@ extern "C" {
     pub fn xCurrentTime(_arg1: *mut sqlite3_vfs, pTime: *mut f64) -> c_int;*/
 }
 
-use libsqlite3_sys::{sqlite3_file, sqlite3_vfs, sqlite3_vfs_register, SQLITE_IOERR};
-use std::os::raw::{c_char, c_int, c_void};
-use std::ptr::null_mut;
-use wasm_bindgen::prelude::*;
+
+
 
 // JavaScript functions we'll call from Rust
 #[wasm_bindgen]
@@ -57,6 +56,7 @@ extern "C" {
     #[wasm_bindgen(js_namespace = window)]
     fn opfs_file_control(fd: i32, op: i32, arg: *mut c_void) -> i32;
 }
+
 
 // Custom file structure for our VFS
 #[repr(C)]
@@ -134,17 +134,7 @@ unsafe extern "C" fn opfs_vfs_device_characteristics(_file: *mut sqlite3_file) -
     libsqlite3_sys::SQLITE_IOCAP_UNDELETABLE_WHEN_OPEN
 }
 
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = window)]
-    fn opfs_acquire_lock(fd: i32, lock: i32) -> i32;
 
-    #[wasm_bindgen(js_namespace = window)]
-    fn opfs_release_lock(fd: i32, lock: i32) -> i32;
-
-    #[wasm_bindgen(js_namespace = window)]
-    fn opfs_file_control(fd: i32, op: i32, arg: *mut c_void) -> i32;
-}
 // VFS functions
 unsafe extern "C" fn opfs_vfs_open(
     _vfs: *mut sqlite3_vfs,
