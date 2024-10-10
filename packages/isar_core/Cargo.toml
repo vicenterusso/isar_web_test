@@ -32,7 +32,6 @@ mdbx-sys = { package = "mdbx-sys", path = "../mdbx_sys", optional = true }
 
 # Common SQLite dependency
 libsqlite3-sys = { git = "https://github.com/isar/rusqlite.git", branch = "wasm", features=["bundled"], optional = true  }
-mdbx-sys = { package = "mdbx-sys", path = "../mdbx_sys", optional = true  }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 widestring = "1.0"
