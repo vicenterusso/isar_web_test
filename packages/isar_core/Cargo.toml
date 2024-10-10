@@ -8,7 +8,7 @@ edition = "2021"
 itertools = "0.11"
 enum_dispatch = "0.3.8"
 xxhash-rust = { version = "0.8.5", features = ["xxh3"] }
-serde =  { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
 byteorder = "1"
 intmap = "2.0.0"
@@ -19,10 +19,18 @@ paste = "1.0.12"
 parking_lot = "0.12"
 proc-macro2 = "1.0.66"
 arc-swap = "1.6.0"
+
+# WebAssembly-specific dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 web-sys = { version = "0.3.70", features = ["Window", "Crypto"] }
 
+# Native platform dependencies
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+mdbx-sys = { package = "mdbx-sys", path = "../mdbx_sys", optional = true }
+
+# Common SQLite dependency
 libsqlite3-sys = { git = "https://github.com/isar/rusqlite.git", branch = "wasm", features=["bundled"], optional = true  }
 mdbx-sys = { package = "mdbx-sys", path = "../mdbx_sys", optional = true  }
 

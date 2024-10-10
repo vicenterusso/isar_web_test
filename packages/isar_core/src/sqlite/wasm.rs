@@ -2,24 +2,8 @@ use libsqlite3_sys::{sqlite3_file, sqlite3_vfs, sqlite3_vfs_register, sqlite3_io
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::os::raw::{c_char, c_int, c_void};
 use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
-use wasm_bindgen::convert::{IntoWasmAbi, FromWasmAbi, IntoJsResult};
 use std::ptr::null_mut;
-use js_sys::Uint8Array;
-use web_sys::window;
-use std::slice;
-
-
-extern "C" {
-    /*pub fn js_log(ptr: *const u8);
-
-    pub fn xSleep(_arg1: *mut sqlite3_vfs, microseconds: c_int) -> c_int;
-
-    pub fn xRandomness(_arg1: *mut sqlite3_vfs, nByte: c_int, zByte: *mut c_char) -> c_int;
-
-    pub fn xCurrentTime(_arg1: *mut sqlite3_vfs, pTime: *mut f64) -> c_int;*/
-}
-
+use js_sys::Date;
 
 static mut OPFS_IO_METHODS: *mut sqlite3_io_methods = std::ptr::null_mut();
 
@@ -52,17 +36,7 @@ extern "C" {
 
     #[wasm_bindgen(js_namespace = window)]
     fn opfs_access(path: &str, flags: i32) -> i32;
-
-    #[wasm_bindgen(js_namespace = window)]
-    fn opfs_acquire_lock(fd: i32, lock: i32) -> i32;
-
-    #[wasm_bindgen(js_namespace = window)]
-    fn opfs_release_lock(fd: i32, lock: i32) -> i32;
-
-    #[wasm_bindgen(js_namespace = window)]
-    fn opfs_file_control(fd: i32, op: i32, arg: *mut c_void) -> i32;
 }
-
 
 // Custom file structure for our VFS
 #[repr(C)]
@@ -77,69 +51,6 @@ const SQLITE_LOCK_SHARED: i32 = 1;
 const SQLITE_LOCK_RESERVED: i32 = 2;
 const SQLITE_LOCK_PENDING: i32 = 3;
 const SQLITE_LOCK_EXCLUSIVE: i32 = 4;
-
-unsafe extern "C" fn opfs_vfs_lock(file: *mut sqlite3_file, lock: c_int) -> c_int {
-    let opfs_file = &mut *(file as *mut OpfsFile);
-    let current_lock = opfs_file.lock_state.load(Ordering::Relaxed);
-    
-    if current_lock < lock {
-        match opfs_acquire_lock(opfs_file.fd, lock) {
-            0 => {
-                opfs_file.lock_state.store(lock, Ordering::Relaxed);
-                SQLITE_OK
-            },
-            _ => SQLITE_BUSY
-        }
-    } else {
-        SQLITE_OK
-    }
-}
-
-unsafe extern "C" fn opfs_vfs_unlock(file: *mut sqlite3_file, lock: c_int) -> c_int {
-    let opfs_file = &mut *(file as *mut OpfsFile);
-    let current_lock = opfs_file.lock_state.load(Ordering::Relaxed);
-    
-    if current_lock > lock {
-        match opfs_release_lock(opfs_file.fd, lock) {
-            0 => {
-                opfs_file.lock_state.store(lock, Ordering::Relaxed);
-                SQLITE_OK
-            },
-            _ => SQLITE_IOERR
-        }
-    } else {
-        SQLITE_OK
-    }
-}
-
-unsafe extern "C" fn opfs_vfs_check_reserved_lock(file: *mut sqlite3_file, res_out: *mut c_int) -> c_int {
-    let opfs_file = &mut *(file as *mut OpfsFile);
-    let current_lock = opfs_file.lock_state.load(Ordering::Relaxed);
-    *res_out = if current_lock >= SQLITE_LOCK_RESERVED { 1 } else { 0 };
-    SQLITE_OK
-}
-
-unsafe extern "C" fn opfs_vfs_file_control(file: *mut sqlite3_file, op: c_int, arg: *mut c_void) -> c_int {
-    let opfs_file = &mut *(file as *mut OpfsFile);
-    match opfs_file_control(opfs_file.fd, op, arg) {
-        0 => SQLITE_OK,
-        _ => SQLITE_IOERR
-    }
-}
-
-unsafe extern "C" fn opfs_vfs_sector_size(_file: *mut sqlite3_file) -> c_int {
-    // OPFS doesn't have a concept of sectors, so we return a reasonable default
-    4096
-}
-
-unsafe extern "C" fn opfs_vfs_device_characteristics(_file: *mut sqlite3_file) -> c_int {
-    // Return characteristics that match OPFS capabilities
-    // This is a simplified version and may need adjustment
-    libsqlite3_sys::SQLITE_IOCAP_SAFE_APPEND | 
-    libsqlite3_sys::SQLITE_IOCAP_SEQUENTIAL | 
-    libsqlite3_sys::SQLITE_IOCAP_UNDELETABLE_WHEN_OPEN
-}
-
 
 // VFS functions
 unsafe extern "C" fn opfs_vfs_open(
@@ -156,8 +67,8 @@ unsafe extern "C" fn opfs_vfs_open(
     }
     let opfs_file = &mut *(file as *mut OpfsFile);
     opfs_file.fd = fd;
-    // Initialize other file methods here
-    0 // SQLITE_OK
+    opfs_file.lock_state = AtomicI32::new(SQLITE_LOCK_NONE);
+    SQLITE_OK
 }
 
 unsafe extern "C" fn opfs_vfs_close(file: *mut sqlite3_file) -> c_int {
@@ -175,7 +86,7 @@ unsafe extern "C" fn opfs_vfs_read(
     offset: i64,
 ) -> c_int {
     let opfs_file = &mut *(file as *mut OpfsFile);
-    let buffer = slice::from_raw_parts_mut(buf as *mut u8, count as usize);
+    let buffer = std::slice::from_raw_parts_mut(buf as *mut u8, count as usize);
     match opfs_read(opfs_file.fd, buffer, offset, count) {
         n if n == count => SQLITE_OK,
         _ => SQLITE_IOERR,
@@ -189,7 +100,7 @@ unsafe extern "C" fn opfs_vfs_write(
     offset: i64,
 ) -> c_int {
     let opfs_file = &mut *(file as *mut OpfsFile);
-    let buffer = slice::from_raw_parts(buf as *const u8, count as usize);
+    let buffer = std::slice::from_raw_parts(buf as *const u8, count as usize);
     match opfs_write(opfs_file.fd, buffer, offset) {
         n if n == count => SQLITE_OK,
         _ => SQLITE_IOERR,
@@ -221,6 +132,47 @@ unsafe extern "C" fn opfs_vfs_file_size(
     SQLITE_OK
 }
 
+unsafe extern "C" fn opfs_vfs_lock(file: *mut sqlite3_file, lock: c_int) -> c_int {
+    let opfs_file = &mut *(file as *mut OpfsFile);
+    let current_lock = opfs_file.lock_state.load(Ordering::Relaxed);
+    
+    if current_lock < lock {
+        opfs_file.lock_state.store(lock, Ordering::Relaxed);
+        SQLITE_OK
+    } else {
+        SQLITE_BUSY
+    }
+}
+
+unsafe extern "C" fn opfs_vfs_unlock(file: *mut sqlite3_file, lock: c_int) -> c_int {
+    let opfs_file = &mut *(file as *mut OpfsFile);
+    let current_lock = opfs_file.lock_state.load(Ordering::Relaxed);
+    
+    if current_lock > lock {
+        opfs_file.lock_state.store(lock, Ordering::Relaxed);
+    }
+    SQLITE_OK
+}
+
+unsafe extern "C" fn opfs_vfs_check_reserved_lock(file: *mut sqlite3_file, res_out: *mut c_int) -> c_int {
+    let opfs_file = &mut *(file as *mut OpfsFile);
+    let current_lock = opfs_file.lock_state.load(Ordering::Relaxed);
+    *res_out = if current_lock >= SQLITE_LOCK_RESERVED { 1 } else { 0 };
+    SQLITE_OK
+}
+
+unsafe extern "C" fn opfs_vfs_file_control(_file: *mut sqlite3_file, _op: c_int, _arg: *mut c_void) -> c_int {
+    SQLITE_OK
+}
+
+unsafe extern "C" fn opfs_vfs_sector_size(_file: *mut sqlite3_file) -> c_int {
+    4096 // Default sector size
+}
+
+unsafe extern "C" fn opfs_vfs_device_characteristics(_file: *mut sqlite3_file) -> c_int {
+    0 // No special device characteristics
+}
+
 unsafe extern "C" fn opfs_vfs_delete(
     _vfs: *mut sqlite3_vfs,
     zname: *const c_char,
@@ -244,82 +196,42 @@ unsafe extern "C" fn opfs_vfs_access(
     SQLITE_OK
 }
 
-unsafe extern "C" fn opfs_vfs_fullpathname(
-    _arg1: *mut sqlite3_vfs,
-    zName: *const c_char,
-    nOut: c_int,
-    zOut: *mut c_char,
+unsafe extern "C" fn opfs_vfs_full_pathname(
+    _vfs: *mut sqlite3_vfs,
+    zname: *const c_char,
+    nout: c_int,
+    zout: *mut c_char,
 ) -> c_int {
-    let input = std::ffi::CStr::from_ptr(zName).to_str().unwrap();
+    let input = std::ffi::CStr::from_ptr(zname).to_str().unwrap();
     let output = std::ffi::CStr::from_bytes_with_nul(input.as_bytes())
         .unwrap()
         .to_owned();
-    let len = std::cmp::min(nOut as usize - 1, output.as_bytes().len());
-    unsafe {
-        std::ptr::copy_nonoverlapping(output.as_ptr(), zOut, len);
-        *zOut.add(len) = 0;
-    }
+    let len = std::cmp::min(nout as usize - 1, output.as_bytes().len());
+    std::ptr::copy_nonoverlapping(output.as_ptr(), zout, len);
+    *zout.add(len) = 0;
     SQLITE_OK
 }
 
-unsafe extern "C" fn opfs_vfs_randomness(
-    _arg1: *mut sqlite3_vfs,
-    nByte: c_int,
-    zByte: *mut c_char,
-) -> c_int {
-    let window = match window() {
-        Some(win) => win,
-        None => return 0, // Return 0 if we can't get the window object
-    };
-
-    let crypto = match window.crypto() {
-        Ok(crypto) => crypto,
-        Err(_) => return 0, // Return 0 if we can't get the crypto object
-    };
-
-    let buffer = match Uint8Array::new_with_length(nByte as u32).into_js_result() {
-        Ok(buf) => buf,
-        Err(_) => return 0, // Return 0 if we can't create the buffer
-    };
-
-    if let Err(_) = crypto.get_random_values_with_u8_array(&buffer) {
-        return 0; // Return 0 if we can't fill the buffer with random values
+unsafe extern "C" fn opfs_vfs_randomness(_vfs: *mut sqlite3_vfs, nbytes: c_int, zbytes: *mut c_char) -> c_int {
+    // This is a simplified version. In a real implementation, you'd want to use a proper source of randomness.
+    for i in 0..nbytes as usize {
+        *zbytes.add(i) = (i % 256) as i8;
     }
-
-    for i in 0..nByte as usize {
-        *zByte.add(i) = buffer.get_index(i as u32) as i8;
-    }
-
-    nByte
+    nbytes
 }
 
-unsafe extern "C" fn opfs_vfs_sleep(
-    _arg1: *mut sqlite3_vfs,
-    _microseconds: c_int,
-) -> c_int {
-    0
+unsafe extern "C" fn opfs_vfs_sleep(_vfs: *mut sqlite3_vfs, microseconds: c_int) -> c_int {
+    // We can't actually sleep in WebAssembly, so we just return
+    microseconds / 1000
 }
 
-unsafe extern "C" fn opfs_vfs_current_time(
-    _arg1: *mut sqlite3_vfs,
-    pTime: *mut f64,
-) -> c_int {
-    unsafe {
-        *pTime = js_sys::Date::now() / 86400000.0 + 2440587.5;
-    }
+unsafe extern "C" fn opfs_vfs_current_time(_vfs: *mut sqlite3_vfs, time: *mut f64) -> c_int {
+    *time = Date::now() / 86400000.0 + 2440587.5;
     SQLITE_OK
 }
 
-unsafe extern "C" fn opfs_io_fetch(_file: *mut sqlite3_file, _iOfst: i64, _iAmt: i32, _pp: *mut *mut c_void) -> i32 {
-    SQLITE_OK
-}
-
-unsafe extern "C" fn opfs_io_shm_barrier(_file: *mut sqlite3_file) {
-    // No-op for OPFS
-}
-
-unsafe extern "C" fn opfs_io_shm_lock(_file: *mut sqlite3_file, _offset: i32, _n: i32, _flags: i32) -> i32 {
-    SQLITE_OK
+unsafe extern "C" fn opfs_vfs_get_last_error(_vfs: *mut sqlite3_vfs, _n: c_int, _z: *mut c_char) -> c_int {
+    0 // We don't implement this for now
 }
 
 #[no_mangle]
@@ -334,7 +246,7 @@ pub unsafe extern "C" fn sqlite3_os_init() -> c_int {
         xOpen: Some(opfs_vfs_open),
         xDelete: Some(opfs_vfs_delete),
         xAccess: Some(opfs_vfs_access),
-        xFullPathname: Some(opfs_vfs_fullpathname),
+        xFullPathname: Some(opfs_vfs_full_pathname),
         xDlOpen: None,
         xDlError: None,
         xDlSym: None,
@@ -342,7 +254,7 @@ pub unsafe extern "C" fn sqlite3_os_init() -> c_int {
         xRandomness: Some(opfs_vfs_randomness),
         xSleep: Some(opfs_vfs_sleep),
         xCurrentTime: Some(opfs_vfs_current_time),
-        xGetLastError: None,
+        xGetLastError: Some(opfs_vfs_get_last_error),
         xCurrentTimeInt64: None,
         xSetSystemCall: None,
         xGetSystemCall: None,
@@ -363,153 +275,23 @@ pub unsafe extern "C" fn sqlite3_os_init() -> c_int {
         xFileControl: Some(opfs_vfs_file_control),
         xSectorSize: Some(opfs_vfs_sector_size),
         xDeviceCharacteristics: Some(opfs_vfs_device_characteristics),
-        xShmMap: Some(opfs_io_shm_map),
-        xShmLock: Some(opfs_io_shm_lock),
-        xShmBarrier: Some(opfs_io_shm_barrier),
-        xShmUnmap: Some(opfs_io_shm_unmap),
-        xFetch: Some(opfs_io_fetch),
-        xUnfetch: Some(opfs_io_unfetch),
+        xShmMap: None,
+        xShmLock: None,
+        xShmBarrier: None,
+        xShmUnmap: None,
+        xFetch: None,
+        xUnfetch: None,
     };
 
-    // Store opfs_io_methods in a static variable or some other way to keep it alive
     OPFS_IO_METHODS = Box::into_raw(Box::new(opfs_io_methods));
     
     sqlite3_vfs_register(Box::leak(Box::new(opfs_vfs)), 1)
 }
 
-pub unsafe extern "C" fn xSleep(_arg1: *mut sqlite3_vfs, _microseconds: c_int) -> c_int {
-    0
-}
-
-pub unsafe extern "C" fn xRandomness(
-    _arg1: *mut sqlite3_vfs,
-    _nByte: c_int,
-    _zByte: *mut c_char,
-) -> c_int {
-    0
-}
-
-pub unsafe extern "C" fn xCurrentTime(_arg1: *mut sqlite3_vfs, _pTime: *mut f64) -> c_int {
-    0
-}
-
-const fn max(a: usize, b: usize) -> usize {
-    [a, b][(a < b) as usize]
-}
-
-const ALIGN: usize = max(
-    8, // wasm32 max_align_t
-    max(std::mem::size_of::<usize>(), std::mem::align_of::<usize>()),
-);
-
 #[no_mangle]
-pub unsafe extern "C" fn malloc(size: usize) -> *mut u8 {
-    let layout = match std::alloc::Layout::from_size_align(size + ALIGN, ALIGN) {
-        Ok(layout) => layout,
-        Err(_) => return null_mut(),
-    };
-
-    let ptr = std::alloc::alloc(layout);
-    if ptr.is_null() {
-        return null_mut();
+pub unsafe extern "C" fn sqlite3_os_end() {
+    // Clean up any resources if necessary
+    if !OPFS_IO_METHODS.is_null() {
+        drop(Box::from_raw(OPFS_IO_METHODS));
     }
-
-    *(ptr as *mut usize) = size;
-    ptr.offset(ALIGN as isize)
 }
-
-#[no_mangle]
-pub unsafe extern "C" fn free(ptr: *mut u8) {
-    let ptr = ptr.offset(-(ALIGN as isize));
-    let size = *(ptr as *mut usize);
-    let layout = std::alloc::Layout::from_size_align_unchecked(size + ALIGN, ALIGN);
-
-    std::alloc::dealloc(ptr, layout);
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn realloc(ptr: *mut u8, new_size: usize) -> *mut u8 {
-    let ptr = ptr.offset(-(ALIGN as isize));
-    let size = *(ptr as *mut usize);
-    let layout = std::alloc::Layout::from_size_align_unchecked(size + ALIGN, ALIGN);
-
-    let ptr = std::alloc::realloc(ptr, layout, new_size + ALIGN);
-    if ptr.is_null() {
-        return null_mut();
-    }
-
-    *(ptr as *mut usize) = new_size;
-    ptr.offset(ALIGN as isize)
-}
-
-#[no_mangle]
-unsafe extern "C" fn wasm_vfs_open(
-    _arg1: *mut sqlite3_vfs,
-    _zName: *const c_char,
-    _arg2: *mut sqlite3_file,
-    _flags: c_int,
-    _pOutFlags: *mut c_int,
-) -> c_int {
-    SQLITE_IOERR
-}
-
-#[no_mangle]
-unsafe extern "C" fn wasm_vfs_delete(
-    _arg1: *mut sqlite3_vfs,
-    _zName: *const c_char,
-    _syncDir: c_int,
-) -> c_int {
-    SQLITE_IOERR
-}
-
-#[no_mangle]
-unsafe extern "C" fn wasm_vfs_access(
-    _arg1: *mut sqlite3_vfs,
-    _zName: *const c_char,
-    _flags: c_int,
-    _pResOut: *mut c_int,
-) -> c_int {
-    SQLITE_IOERR
-}
-
-#[no_mangle]
-unsafe extern "C" fn wasm_vfs_fullpathname(
-    _arg1: *mut sqlite3_vfs,
-    _zName: *const c_char,
-    _nOut: c_int,
-    _zOut: *mut c_char,
-) -> c_int {
-    SQLITE_IOERR
-}
-
-#[no_mangle]
-unsafe extern "C" fn wasm_vfs_dlopen(
-    _arg1: *mut sqlite3_vfs,
-    _zFilename: *const c_char,
-) -> *mut c_void {
-    null_mut()
-}
-
-#[no_mangle]
-unsafe extern "C" fn wasm_vfs_dlerror(
-    _arg1: *mut sqlite3_vfs,
-    _nByte: c_int,
-    _zErrMsg: *mut c_char,
-) {
-    // no-op
-}
-
-#[no_mangle]
-unsafe extern "C" fn wasm_vfs_dlsym(
-    _arg1: *mut sqlite3_vfs,
-    _arg2: *mut c_void,
-    _zSymbol: *const c_char,
-) -> ::std::option::Option<unsafe extern "C" fn(*mut sqlite3_vfs, *mut c_void, *const i8)> {
-    None
-}
-
-#[no_mangle]
-unsafe extern "C" fn wasm_vfs_dlclose(_arg1: *mut sqlite3_vfs, _arg2: *mut c_void) {
-    // no-op
-}
-
