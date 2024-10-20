@@ -31,7 +31,7 @@ web-sys = { version = "0.3.70", features = ["Window", "Crypto"] }
 mdbx-sys = { package = "mdbx-sys", path = "../mdbx_sys", optional = true }
 
 # Common SQLite dependency
-rusqlite  = { git = "https://github.com/isar/rusqlite.git", branch = "wasm", features=["bundled"], optional = true  }
+libsqlite3-sys = { git = "https://github.com/isar/rusqlite.git", branch = "wasm", features=["bundled"], optional = true  }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 widestring = "1.0"
@@ -48,6 +48,6 @@ features = ["float_roundtrip"]
 [features]
 default = ["native", "sqlite"]
 native = ["mdbx-sys"]
-sqlite = ["rusqlite"]
-sqlcipher = ["sqlite", "rusqlite/bundled-sqlcipher"]
-sqlcipher-vendored = ["sqlcipher", "rusqlite/bundled-sqlcipher-vendored-openssl"]
+sqlite = ["libsqlite3-sys"]
+sqlcipher = ["sqlite", "libsqlite3-sys/bundled-sqlcipher"]
+sqlcipher-vendored = ["sqlcipher", "libsqlite3-sys/bundled-sqlcipher-vendored-openssl"]
