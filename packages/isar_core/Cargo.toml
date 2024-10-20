@@ -31,7 +31,8 @@ web-sys = { version = "0.3.70", features = ["Window", "Crypto"] }
 mdbx-sys = { package = "mdbx-sys", path = "../mdbx_sys", optional = true }
 
 # Common SQLite dependency
-libsqlite3-sys = { git = "https://github.com/isar/rusqlite.git", branch = "wasm", features=["bundled"], optional = true  }
+# libsqlite3-sys = { git = "https://github.com/isar/rusqlite.git", branch = "wasm", features=["bundled"], optional = true  }
+libsqlite3-sys = { version = "0.32.1", features = ["bundled"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 widestring = "1.0"

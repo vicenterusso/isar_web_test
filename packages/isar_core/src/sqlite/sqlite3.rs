@@ -7,6 +7,23 @@ use std::{ptr, slice};
 
 use super::sql::{sql_fn_filter_json, FN_FILTER_JSON_NAME};
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+extern "C" {
+    fn opfs_open(path: &str, flags: i32) -> i32;
+    fn opfs_close(fd: i32) -> i32;
+    fn opfs_read(fd: i32, buffer: &mut [u8], offset: i64, len: i32) -> i32;
+    fn opfs_write(fd: i32, buffer: &[u8], offset: i64) -> i32;
+    fn opfs_truncate(fd: i32, size: i64) -> i32;
+    fn opfs_sync(fd: i32) -> i32;
+    fn opfs_file_size(fd: i32) -> i64;
+    fn opfs_delete(path: &str) -> i32;
+    fn opfs_access(path: &str, flags: i32) -> i32;
+}
+
 pub(crate) struct SQLite3 {
     db: *mut ffi::sqlite3,
     free_update_hook: Cell<Option<unsafe extern "C" fn(*mut std::os::raw::c_void)>>,
@@ -18,29 +35,47 @@ impl SQLite3 {
     pub(crate) const MAX_PARAM_COUNT: u32 = 999;
 
     pub fn open(path: &str, encryption_key: Option<&str>) -> Result<SQLite3> {
-        let flags = ffi::SQLITE_OPEN_READWRITE | ffi::SQLITE_OPEN_CREATE | ffi::SQLITE_OPEN_NOMUTEX;
-        let c_path = CString::new(path).unwrap();
-        let mut db: *mut ffi::sqlite3 = ptr::null_mut();
-        unsafe {
-            let r = ffi::sqlite3_open_v2(c_path.as_ptr(), &mut db, flags, ptr::null());
-            if r == ffi::SQLITE_OK {
-                let sqlite = SQLite3 {
-                    db,
-                    free_update_hook: Cell::new(None),
-                };
-                if let Some(encryption_key) = encryption_key {
-                    sqlite
-                        .key(encryption_key)
-                        .map_err(|_| IsarError::EncryptionError {})?;
+        #[cfg(target_arch = "wasm32")]
+        {
+            let fd = opfs_open(path, ffi::SQLITE_OPEN_READWRITE | ffi::SQLITE_OPEN_CREATE);
+            if fd < 0 {
+                return Err(IsarError::DbError {
+                    code: fd,
+                    message: "Failed to open database".to_string(),
+                });
+            }
+            // Initialize SQLite3 structure with OPFS file descriptor
+            // You'll need to modify the SQLite3 struct to hold this fd
+            Ok(SQLite3 { fd, /* other fields */ })
+        }
+
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let flags = ffi::SQLITE_OPEN_READWRITE | ffi::SQLITE_OPEN_CREATE | ffi::SQLITE_OPEN_NOMUTEX;
+            let c_path = CString::new(path).unwrap();
+            let mut db: *mut ffi::sqlite3 = ptr::null_mut();
+            unsafe {
+                let r = ffi::sqlite3_open_v2(c_path.as_ptr(), &mut db, flags, ptr::null());
+                if r == ffi::SQLITE_OK {
+                    let sqlite = SQLite3 {
+                        db,
+                        free_update_hook: Cell::new(None),
+                    };
+                    if let Some(encryption_key) = encryption_key {
+                        sqlite
+                            .key(encryption_key)
+                            .map_err(|_| IsarError::EncryptionError {})?;
+                    }
+                    sqlite.initialize()?;
+                    Ok(sqlite)
+                } else {
+                    let err = sqlite_err(db, r);
+                    if !db.is_null() {
+                        ffi::sqlite3_close(db);
+                    }
+                    Err(err)
                 }
-                sqlite.initialize()?;
-                Ok(sqlite)
-            } else {
-                let err = sqlite_err(db, r);
-                if !db.is_null() {
-                    ffi::sqlite3_close(db);
-                }
-                Err(err)
             }
         }
     }
