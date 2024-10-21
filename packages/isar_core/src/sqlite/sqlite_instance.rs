@@ -1,4 +1,3 @@
-use wasm_bindgen::JsValue;
 use super::sqlite3::SQLite3;
 use super::sqlite_collection::SQLiteCollection;
 use super::sqlite_cursor::SQLiteCursor;
@@ -23,11 +22,15 @@ use std::sync::Arc;
 use std::vec;
 
 #[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsValue;
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use js_sys;
 #[cfg(target_arch = "wasm32")]
 use web_sys;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures;
 
 pub(crate) struct SQLiteInstanceInfo {
     pub(crate) instance_id: u32,
@@ -85,12 +88,17 @@ impl SQLiteInstance {
                 message: "Failed to find initOPFS function".to_string() 
             })?
             .dyn_into()
-            .unwrap();
-        let _ = init_opfs.call0(&JsValue::NULL)
             .map_err(|_| IsarError::DbError { 
                 code: 2,
+                message: "initOPFS is not a function".to_string() 
+            })?;
+        
+        let _ = init_opfs.call0(&JsValue::NULL)
+            .map_err(|_| IsarError::DbError { 
+                code: 3,
                 message: "Failed to initialize OPFS".to_string() 
             })?;
+        
         Ok(())
     }
 
@@ -398,6 +406,11 @@ impl IsarInstance for SQLiteInstance {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = initOPFS)]
-pub fn init_opfs() -> Result<(), JsValue> {
-    SQLiteInstance::init_opfs().map_err(|e| JsValue::from_str(&e.to_string()))
+pub fn init_opfs() -> js_sys::Promise {
+    wasm_bindgen_futures::future_to_promise(async {
+        match SQLiteInstance::init_opfs() {
+            Ok(()) => Ok(JsValue::from_str("OPFS initialized successfully")),
+            Err(e) => Err(JsValue::from_str(&e.to_string())),
+        }
+    })
 }

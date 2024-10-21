@@ -27,6 +27,7 @@ extern "C" {
 pub(crate) struct SQLite3 {
     db: *mut ffi::sqlite3,
     free_update_hook: Cell<Option<unsafe extern "C" fn(*mut std::os::raw::c_void)>>,
+    fd: i32,
 }
 
 unsafe impl Send for SQLite3 {}
@@ -44,9 +45,11 @@ impl SQLite3 {
                     message: "Failed to open database".to_string(),
                 });
             }
-            // Initialize SQLite3 structure with OPFS file descriptor
-            // You'll need to modify the SQLite3 struct to hold this fd
-            Ok(SQLite3 { fd, /* other fields */ })
+            Ok(SQLite3 {
+                db: std::ptr::null_mut(),
+                free_update_hook: Cell::new(None),
+                fd,
+            })
         }
 
 
